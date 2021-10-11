@@ -3,6 +3,7 @@
 # Copyright (C) 2021 Collabora Limited
 # Author: Guillaume Tucker <guillaume.tucker@collabora.com>
 
+from cloudevents.http import CloudEvent, from_json
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from .auth import Authentication, Token
@@ -25,6 +26,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
             detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    print(f"Get current user: {user}")
     return user
 
 
@@ -74,22 +76,37 @@ def things():
 
 
 @app.post('/thing')
-def create_thing(thing: Thing, token: str = Depends(get_current_user)):
+def create_thing(thing: Thing, user: User = Depends(get_current_active_user)):
     return {'thing': db.create(thing)}
 
 
 @app.get('/subscribe/{channel}')
-def subscribe(channel: str):
-    pubsub.subscribe(channel)
+def subscribe(channel: str, user: User = Depends(get_current_active_user)):
+    pubsub.subscribe(user, channel)
     return "OK"
 
 
-@app.get('/listen')
-def listen():
-    return pubsub.listen()
+@app.get('/unsubscribe/{channel}')
+def unsubscribe(channel: str, user: User = Depends(get_current_active_user)):
+    pubsub.unsubscribe(user, channel)
+    return "OK"
+
+
+@app.get('/listen/{channel}')
+def listen(channel: str, user: User = Depends(get_current_active_user)):
+    return pubsub.listen(user, channel)
 
 
 @app.get('/publish/{channel}/{message}')
-def listen(channel: str, message: str):
-    pubsub.publish(channel, message)
-    return "OK"
+def publish(channel: str, message: str,
+           user: User = Depends(get_current_active_user)):
+    return pubsub.publish(user, channel, message)
+
+
+@app.post('/publish2/{channel}')
+def publish2(raw_event: dict, channel: str,
+             user: User = Depends(get_current_active_user)):
+    attributes = dict(raw_event)
+    data = attributes.pop('data')
+    event = CloudEvent(attributes=attributes, data=data)
+    return pubsub.publish2(user, channel, event)
