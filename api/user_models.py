@@ -7,7 +7,7 @@
 # at the moment
 # pylint: disable=too-few-public-methods
 
-"""User model definitions"""
+"""User model definitions for fastapi-users"""
 
 from typing import Optional
 from pydantic import conlist, Field

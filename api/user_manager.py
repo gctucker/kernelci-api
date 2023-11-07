@@ -3,7 +3,7 @@
 # Copyright (C) 2023 Collabora Limited
 # Author: Jeny Sadadia <jeny.sadadia@collabora.com>
 
-"""User Manager"""
+"""User Manager implementation for fastapi-users"""
 
 from typing import Optional, Any, Dict
 from fastapi import Depends, Request
