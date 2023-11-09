@@ -161,8 +161,8 @@ async def register(request: Request, user: UserCreate,
             if not group:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"User group does not exist with name: \
-    {group_name}")
+                    detail=f"User group not found: {group_name}"
+                )
             groups.append(group)
     user.groups = groups
     created_user = await register_router.routes[0].endpoint(
