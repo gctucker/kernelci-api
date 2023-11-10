@@ -26,7 +26,6 @@ from fastapi_versioning import VersionedFastAPI
 from bson import ObjectId, errors
 from pymongo.errors import DuplicateKeyError
 from fastapi_users import FastAPIUsers
-from fastapi_users.db import BeanieUserDatabase
 from beanie import PydanticObjectId
 from .auth import Authentication
 from .db import Database
@@ -39,14 +38,13 @@ from .models import (
 )
 from .paginator_models import PageModel
 from .pubsub import PubSub, Subscription
-from .user_manager import get_user_manager
+from .user_manager import get_user_manager, create_user_manager
 from .user_models import (
     User,
     UserRead,
     UserCreate,
     UserUpdate,
 )
-from .user_manager import UserManager
 
 
 # List of all the supported API versions.  This is a placeholder until the API
@@ -64,6 +62,7 @@ fastapi_users_instance = FastAPIUsers[User, PydanticObjectId](
     get_user_manager,
     [auth_backend],
 )
+user_manager = create_user_manager()
 
 
 @app.on_event('startup')
@@ -167,7 +166,7 @@ async def register(request: Request, user: UserCreate,
             groups.append(group)
     user.groups = groups
     created_user = await register_router.routes[0].endpoint(
-        request, user, UserManager(BeanieUserDatabase(User)))
+        request, user, user_manager)
     # Update user to be an admin user explicitly if requested as
     # `fastapi-users` register route does not allow it
     if user.is_superuser:
@@ -221,12 +220,13 @@ async def update_me(request: Request, user: UserUpdate,
     Custom user update router handler will only allow users to update
     its own profile. Adding itself to 'admin' group is not allowed.
     """
-    existing_user = await db.find_one(User, username=user.username)
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username already exists",
-        )
+    if user.username and user.username != current_user.username:
+        existing_user = await db.find_one(User, username=user.username)
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Username already exists: {user.username}",
+            )
     groups = []
     if user.groups:
         for group_name in user.groups:
@@ -244,7 +244,7 @@ async def update_me(request: Request, user: UserUpdate,
     if groups:
         user.groups = groups
     return await users_router.routes[1].endpoint(
-        request, user, current_user, UserManager(BeanieUserDatabase(User)))
+        request, user, current_user, user_manager)
 
 
 @app.patch("/user/{user_id}", response_model=UserRead, tags=["user"],
@@ -252,7 +252,6 @@ async def update_me(request: Request, user: UserUpdate,
 async def update_user(user_id: str, request: Request, user: UserUpdate,
                       current_user: User = Depends(get_current_superuser)):
     """Router to allow admin users to update other user account"""
-
     user_from_id = await db.find_by_id(User, user_id)
     if not user_from_id:
         raise HTTPException(
@@ -260,12 +259,13 @@ async def update_user(user_id: str, request: Request, user: UserUpdate,
             detail=f"User not found with id: {user_id}",
         )
 
-    existing_user = await db.find_one(User, username=user.username)
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username already exists",
-        )
+    if user.username and user.username != user_from_id.username:
+        existing_user = await db.find_one(User, username=user.username)
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Username already exists: {user.username}",
+            )
 
     groups = []
     if user.groups:
@@ -281,7 +281,8 @@ async def update_user(user_id: str, request: Request, user: UserUpdate,
         user.groups = groups
 
     updated_user = await users_router.routes[3].endpoint(
-        user, request, user_from_id, UserManager(BeanieUserDatabase(User)))
+        user, request, user_from_id, user_manager
+    )
     # Update user to be an admin user explicitly if requested as
     # `fastapi-users` user update route does not allow it
     if user.is_superuser:
@@ -334,8 +335,7 @@ async def update_password(request: Request,
                           credentials: OAuth2PasswordRequestForm = Depends(),
                           new_password: str = Form(None)):
     """Update user password"""
-    user = await UserManager(BeanieUserDatabase(User)).authenticate(
-        credentials)
+    user = await user_manager.authenticate(credentials)
     if user is None or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -344,8 +344,8 @@ async def update_password(request: Request,
     user_update = UserUpdate(password=new_password)
     user_from_username = await db.find_one(User, username=credentials.username)
     await users_router.routes[3].endpoint(
-        user_update, request, user_from_username,
-        UserManager(BeanieUserDatabase(User)))
+        user_update, request, user_from_username, user_manager
+    )
 
 
 # -----------------------------------------------------------------------------

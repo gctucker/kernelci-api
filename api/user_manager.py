@@ -10,11 +10,9 @@ from fastapi import Depends, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi_users import BaseUserManager
 from fastapi_users.db import (
-    BaseUserDatabase,
     BeanieUserDatabase,
     ObjectIDIDMixin,
 )
-from fastapi_users.password import PasswordHelperProtocol
 from beanie import PydanticObjectId
 import jinja2
 from .user_models import User
@@ -28,14 +26,19 @@ class UserManager(ObjectIDIDMixin, BaseUserManager[User, PydanticObjectId]):
     reset_password_token_secret = settings.secret_key
     verification_token_secret = settings.secret_key
 
-    def __init__(self, user_db: BaseUserDatabase[User, PydanticObjectId],
-                 password_helper: PasswordHelperProtocol | None = None):
-        self._email_sender = EmailSender()
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._email_sender = None
         self._template_env = jinja2.Environment(
-                            loader=jinja2.FileSystemLoader(
-                                "./templates/")
-                        )
-        super().__init__(user_db, password_helper)
+            loader=jinja2.FileSystemLoader("./templates/")
+        )
+
+    @property
+    def email_sender(self):
+        """EmailSender instance"""
+        if self._email_sender is None:
+            self._email_sender = EmailSender()
+        return self._email_sender
 
     async def on_after_register(self, user: User,
                                 request: Optional[Request] = None):
@@ -50,7 +53,7 @@ class UserManager(ObjectIDIDMixin, BaseUserManager[User, PydanticObjectId]):
         content = template.render(
             username=user.username, token=token
         )
-        self._email_sender.create_and_send_email(subject, content, user.email)
+        self.email_sender.create_and_send_email(subject, content, user.email)
 
     async def on_after_verify(self, user: User,
                               request: Optional[Request] = None):
@@ -62,7 +65,7 @@ class UserManager(ObjectIDIDMixin, BaseUserManager[User, PydanticObjectId]):
         content = template.render(
             username=user.username,
         )
-        self._email_sender.create_and_send_email(subject, content, user.email)
+        self.email_sender.create_and_send_email(subject, content, user.email)
 
     async def on_after_login(self, user: User,
                              request: Optional[Request] = None):
@@ -77,7 +80,7 @@ class UserManager(ObjectIDIDMixin, BaseUserManager[User, PydanticObjectId]):
         content = template.render(
             username=user.username, token=token
         )
-        self._email_sender.create_and_send_email(subject, content, user.email)
+        self.email_sender.create_and_send_email(subject, content, user.email)
 
     async def on_after_reset_password(self, user: User,
                                       request: Optional[Request] = None):
@@ -89,7 +92,7 @@ class UserManager(ObjectIDIDMixin, BaseUserManager[User, PydanticObjectId]):
         content = template.render(
             username=user.username,
         )
-        self._email_sender.create_and_send_email(subject, content, user.email)
+        self.email_sender.create_and_send_email(subject, content, user.email)
 
     async def on_after_update(self, user: User, update_dict: Dict[str, Any],
                               request: Optional[Request] = None):
@@ -133,11 +136,16 @@ class UserManager(ObjectIDIDMixin, BaseUserManager[User, PydanticObjectId]):
         return user
 
 
+def create_user_manager():
+    """Create a UserManager object"""
+    return UserManager(BeanieUserDatabase(User))
+
+
 async def get_user_db():
-    """Database adapter for fastapi-users"""
+    """Get a generator with the database adapter for fastapi-users"""
     yield BeanieUserDatabase(User)
 
 
 async def get_user_manager(user_db: BeanieUserDatabase = Depends(get_user_db)):
-    """Get user manager"""
+    """Get a generator with the user manager"""
     yield UserManager(user_db)
